@@ -45,6 +45,7 @@ jobs:
           node-version: 22
 
       - name: Install corepack
+        shell: bash
         run: corepack enable && corepack prepare yarn@4.9.1 --activate
 
       - name: Get yarn cache directory path
@@ -63,9 +64,11 @@ jobs:
             ${{ runner.os }}-yarn-
 
       - name: Install Dependencies
+        shell: bash
         run: yarn install
 
       - name: Build Windows with code signing
+        shell: bash
         run: yarn build:win
         env:
           WIN_SIGN: true
