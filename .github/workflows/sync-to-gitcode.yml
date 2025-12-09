@@ -133,8 +133,8 @@ jobs:
           # Always use gh cli to avoid special character issues
           RELEASE_NAME=$(gh release view "$TAG_NAME" --repo "${{ github.repository }}" --json name -q '.name')
           echo "name=$RELEASE_NAME" >> $GITHUB_OUTPUT
-          # Save body to file for multiline content
-          gh release view "$TAG_NAME" --repo "${{ github.repository }}" --json body -q '.body' > release_body.txt
+          # Extract releaseNotes from electron-builder.yml (from releaseNotes: | to end of file, remove 4-space indent)
+          sed -n '/releaseNotes: |/,$ { /releaseNotes: |/d; s/^    //; p }' electron-builder.yml > release_body.txt
 
       - name: Create GitCode release and upload files
         shell: bash
