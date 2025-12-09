@@ -1,0 +1,135 @@
+name: Test GitCode Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to test (e.g. v1.0.1)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Create test files
+        run: |
+          mkdir -p test-assets
+          echo "test content" > test-assets/test-file.txt
+          dd if=/dev/urandom of=test-assets/test-binary.bin bs=1024 count=10
+
+      - name: Test GitCode release and upload
+        shell: bash
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_OWNER: ${{ secrets.GITCODE_OWNER }}
+          GITCODE_REPO: ${{ secrets.GITCODE_REPO }}
+          GITCODE_API_URL: ${{ secrets.GITCODE_API_URL }}
+          TAG_NAME: ${{ github.event.inputs.tag }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: |
+          API_URL="${GITCODE_API_URL:-https://api.gitcode.com/api/v5}"
+
+          echo "=== Step 1: Create Release ==="
+          echo "Tag: $TAG_NAME"
+          echo "Repo: $GITCODE_OWNER/$GITCODE_REPO"
+
+          # Create release payload with Chinese and emoji
+          cat > /tmp/release_payload.json << 'EOF'
+          {
+            "tag_name": "TAG_PLACEHOLDER",
+            "name": "Test Release 测试发布 🚀",
+            "body": "这是一个测试发布\n\n## 功能\n- 测试中文 ✅\n- 测试 emoji 🎉",
+            "target_commitish": "main"
+          }
+          EOF
+          sed -i "s/TAG_PLACEHOLDER/$TAG_NAME/" /tmp/release_payload.json
+
+          echo "Payload:"
+          cat /tmp/release_payload.json
+
+          RELEASE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -H "Authorization: Bearer ${GITCODE_TOKEN}" \
+            --data-binary "@/tmp/release_payload.json")
+
+          HTTP_CODE=$(echo "$RELEASE_RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RELEASE_RESPONSE" | sed '$d')
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response: $RESPONSE_BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Release created successfully"
+          else
+            echo "❌ Release creation failed"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Step 2: Upload Files ==="
+
+          upload_file() {
+            local file="$1"
+            local filename=$(basename "$file")
+            echo "--- Uploading: $filename ---"
+
+            # URL encode the filename
+            encoded_filename=$(printf '%s' "$filename" | jq -sRr @uri)
+
+            # Get upload URL
+            echo "Getting upload URL..."
+            UPLOAD_INFO=$(curl -s \
+              "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${encoded_filename}")
+
+            echo "Upload info: $UPLOAD_INFO"
+
+            UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
+
+            if [ -z "$UPLOAD_URL" ]; then
+              echo "❌ Failed to get upload URL"
+              return 1
+            fi
+
+            # Write headers to temp file
+            echo "$UPLOAD_INFO" | jq -r '.headers | to_entries[] | "header = \"" + .key + ": " + .value + "\""' > /tmp/upload_headers.txt
+            echo "Headers:"
+            cat /tmp/upload_headers.txt
+
+            # Upload file
+            echo "Uploading to: $UPLOAD_URL"
+            UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+              -K /tmp/upload_headers.txt \
+              --data-binary "@${file}" \
+              "$UPLOAD_URL")
+
+            HTTP_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$UPLOAD_RESPONSE" | sed '$d')
+
+            echo "HTTP Code: $HTTP_CODE"
+            echo "Response: $RESPONSE_BODY"
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✅ Uploaded: $filename"
+            else
+              echo "❌ Failed to upload: $filename"
+              return 1
+            fi
+          }
+
+          # Upload test files
+          for file in test-assets/*; do
+            if [ -f "$file" ]; then
+              upload_file "$file"
+              echo ""
+            fi
+          done
+
+          echo "=== Done ==="
