@@ -1,0 +1,102 @@
+name: Test GitCode Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to test (e.g. v1.0.1)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Extract release notes
+        id: release-info
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.inputs.tag }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: |
+          # Get release name from GitHub
+          RELEASE_NAME=$(gh release view "$TAG_NAME" --repo "${{ github.repository }}" --json name -q '.name')
+          echo "name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "Release name: $RELEASE_NAME"
+
+          # Extract releaseNotes from electron-builder.yml
+          sed -n '/releaseNotes: |/,$ { /releaseNotes: |/d; s/^    //; p }' electron-builder.yml > release_body.txt
+
+          echo "=== Release body content ==="
+          cat release_body.txt
+          echo "=== End of release body ==="
+
+          # Check file encoding
+          echo "File info:"
+          file release_body.txt
+          echo "Hex dump of first 100 bytes:"
+          xxd release_body.txt | head -10
+
+      - name: Create GitCode release
+        shell: bash
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_OWNER: ${{ secrets.GITCODE_OWNER }}
+          GITCODE_REPO: ${{ secrets.GITCODE_REPO }}
+          GITCODE_API_URL: ${{ secrets.GITCODE_API_URL }}
+          TAG_NAME: ${{ github.event.inputs.tag }}
+          RELEASE_NAME: ${{ steps.release-info.outputs.name }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+        run: |
+          API_URL="${GITCODE_API_URL:-https://api.gitcode.com/api/v5}"
+
+          echo "Creating GitCode release..."
+          echo "Tag: $TAG_NAME"
+          echo "Name: $RELEASE_NAME"
+          echo "Repo: $GITCODE_OWNER/$GITCODE_REPO"
+
+          # Use --rawfile to read body directly from file
+          jq -n \
+            --arg tag "$TAG_NAME" \
+            --arg name "$RELEASE_NAME" \
+            --rawfile body release_body.txt \
+            '{
+              tag_name: $tag,
+              name: $name,
+              body: $body,
+              target_commitish: "main"
+            }' > /tmp/release_payload.json
+
+          echo "=== JSON Payload ==="
+          cat /tmp/release_payload.json
+          echo ""
+          echo "=== End of payload ==="
+
+          RELEASE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -H "Authorization: Bearer ${GITCODE_TOKEN}" \
+            --data-binary "@/tmp/release_payload.json")
+
+          HTTP_CODE=$(echo "$RELEASE_RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RELEASE_RESPONSE" | sed '$d')
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response: $RESPONSE_BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Release created successfully"
+          else
+            echo "❌ Release creation failed"
+            exit 1
+          fi
