@@ -150,7 +150,6 @@ jobs:
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
         run: |
-          RELEASE_BODY=$(cat release_body.txt)
           API_URL="${GITCODE_API_URL:-https://api.gitcode.com/api/v5}"
 
           echo "Creating GitCode release..."
@@ -158,20 +157,23 @@ jobs:
           echo "Repo: $GITCODE_OWNER/$GITCODE_REPO"
 
           # Step 1: Create release
+          # Use --rawfile to read body directly from file, avoiding shell variable encoding issues
+          jq -n \
+            --arg tag "$TAG_NAME" \
+            --arg name "$RELEASE_NAME" \
+            --rawfile body release_body.txt \
+            '{
+              tag_name: $tag,
+              name: $name,
+              body: $body,
+              target_commitish: "main"
+            }' > /tmp/release_payload.json
+
           RELEASE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases" \
-            -H "Content-Type: application/json" \
+            -H "Content-Type: application/json; charset=utf-8" \
             -H "Authorization: Bearer ${GITCODE_TOKEN}" \
-            -d "$(jq -n \
-              --arg tag "$TAG_NAME" \
-              --arg name "$RELEASE_NAME" \
-              --arg body "$RELEASE_BODY" \
-              '{
-                tag_name: $tag,
-                name: $name,
-                body: $body,
-                target_commitish: "main"
-              }')")
+            --data-binary "@/tmp/release_payload.json")
 
           HTTP_CODE=$(echo "$RELEASE_RESPONSE" | tail -n1)
           RESPONSE_BODY=$(echo "$RELEASE_RESPONSE" | sed '$d')
@@ -200,8 +202,6 @@ jobs:
             UPLOAD_INFO=$(curl -s \
               "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${encoded_filename}")
 
-            echo "  Upload info response: $UPLOAD_INFO"
-
             UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
 
             if [ -n "$UPLOAD_URL" ]; then
@@ -209,7 +209,6 @@ jobs:
               echo "$UPLOAD_INFO" | jq -r '.headers | to_entries[] | "header = \"" + .key + ": " + .value + "\""' > /tmp/upload_headers.txt
 
               # Upload file using PUT with headers from file
-              echo "  Uploading to: $UPLOAD_URL"
               UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
                 -K /tmp/upload_headers.txt \
                 --data-binary "@${file}" \
