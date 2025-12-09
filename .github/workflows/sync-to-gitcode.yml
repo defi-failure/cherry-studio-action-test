@@ -205,21 +205,15 @@ jobs:
             UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
 
             if [ -n "$UPLOAD_URL" ]; then
-              # Build headers from response
-              HEADERS=""
-              if echo "$UPLOAD_INFO" | jq -e '.headers' > /dev/null 2>&1; then
-                for key in $(echo "$UPLOAD_INFO" | jq -r '.headers | keys[]'); do
-                  value=$(echo "$UPLOAD_INFO" | jq -r ".headers[\"$key\"]")
-                  HEADERS="$HEADERS -H \"$key: $value\""
-                done
-              fi
+              # Write headers to temp file to avoid shell escaping issues
+              echo "$UPLOAD_INFO" | jq -r '.headers | to_entries[] | "header = \"" + .key + ": " + .value + "\""' > /tmp/upload_headers.txt
 
-              # Upload file using PUT
+              # Upload file using PUT with headers from file
               echo "  Uploading to: $UPLOAD_URL"
-              UPLOAD_RESPONSE=$(eval curl -s -w \"\\n%{http_code}\" -X PUT \
-                \"$UPLOAD_URL\" \
-                $HEADERS \
-                --data-binary \"@${file}\")
+              UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+                -K /tmp/upload_headers.txt \
+                --data-binary "@${file}" \
+                "$UPLOAD_URL")
 
               HTTP_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n1)
               RESPONSE_BODY=$(echo "$UPLOAD_RESPONSE" | sed '$d')
