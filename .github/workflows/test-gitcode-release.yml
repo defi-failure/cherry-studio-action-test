@@ -4,8 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to test (e.g. v1.0.1)'
+        description: 'Release tag to create (e.g. v0.0.1-test)'
         required: true
+      release_name:
+        description: 'Release name (default: Cherry Studio {tag})'
+        required: false
 
 permissions:
   contents: read
@@ -16,20 +19,22 @@ jobs:
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag }}
 
       - name: Extract release notes
         id: release-info
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.event.inputs.tag }}
+          INPUT_RELEASE_NAME: ${{ github.event.inputs.release_name }}
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
         run: |
-          # Get release name from GitHub
-          RELEASE_NAME=$(gh release view "$TAG_NAME" --repo "${{ github.repository }}" --json name -q '.name')
+          # Use input release name or default
+          if [ -n "$INPUT_RELEASE_NAME" ]; then
+            RELEASE_NAME="$INPUT_RELEASE_NAME"
+          else
+            RELEASE_NAME="Cherry Studio ${TAG_NAME}"
+          fi
           echo "name=$RELEASE_NAME" >> $GITHUB_OUTPUT
           echo "Release name: $RELEASE_NAME"
 
