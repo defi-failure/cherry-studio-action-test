@@ -129,6 +129,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ steps.get-tag.outputs.tag }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
         run: |
           # Always use gh cli to avoid special character issues
           RELEASE_NAME=$(gh release view "$TAG_NAME" --repo "${{ github.repository }}" --json name -q '.name')
@@ -145,6 +147,8 @@ jobs:
           GITCODE_API_URL: ${{ secrets.GITCODE_API_URL }}
           TAG_NAME: ${{ steps.get-tag.outputs.tag }}
           RELEASE_NAME: ${{ steps.release-info.outputs.name }}
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
         run: |
           RELEASE_BODY=$(cat release_body.txt)
           API_URL="${GITCODE_API_URL:-https://api.gitcode.com/api/v5}"
@@ -189,30 +193,42 @@ jobs:
             local filename=$(basename "$file")
             echo "Uploading: $filename"
 
+            # URL encode the filename
+            encoded_filename=$(printf '%s' "$filename" | jq -sRr @uri)
+
             # Get upload URL
             UPLOAD_INFO=$(curl -s \
-              "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${filename}")
+              "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${encoded_filename}")
 
-            UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url')
+            echo "  Upload info response: $UPLOAD_INFO"
 
-            if [ "$UPLOAD_URL" != "null" ] && [ -n "$UPLOAD_URL" ]; then
+            UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
+
+            if [ -n "$UPLOAD_URL" ]; then
               # Build headers from response
               HEADERS=""
-              for key in $(echo "$UPLOAD_INFO" | jq -r '.headers | keys[]'); do
-                value=$(echo "$UPLOAD_INFO" | jq -r ".headers[\"$key\"]")
-                HEADERS="$HEADERS -H \"$key: $value\""
-              done
+              if echo "$UPLOAD_INFO" | jq -e '.headers' > /dev/null 2>&1; then
+                for key in $(echo "$UPLOAD_INFO" | jq -r '.headers | keys[]'); do
+                  value=$(echo "$UPLOAD_INFO" | jq -r ".headers[\"$key\"]")
+                  HEADERS="$HEADERS -H \"$key: $value\""
+                done
+              fi
 
               # Upload file using PUT
-              HTTP_CODE=$(eval curl -s -w \"%{http_code}\" -o /dev/null -X PUT \
+              echo "  Uploading to: $UPLOAD_URL"
+              UPLOAD_RESPONSE=$(eval curl -s -w \"\\n%{http_code}\" -X PUT \
                 \"$UPLOAD_URL\" \
                 $HEADERS \
                 --data-binary \"@${file}\")
+
+              HTTP_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n1)
+              RESPONSE_BODY=$(echo "$UPLOAD_RESPONSE" | sed '$d')
 
               if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
                 echo "  Uploaded: $filename"
               else
                 echo "  Warning: Failed to upload $filename (HTTP $HTTP_CODE)"
+                echo "  Response: $RESPONSE_BODY"
               fi
             else
               echo "  Warning: Failed to get upload URL for $filename"
