@@ -72,6 +72,9 @@ jobs:
         run: yarn build:win
         env:
           WIN_SIGN: true
+          CHERRY_CERT_PATH: ${{ secrets.CHERRY_CERT_PATH }}
+          CHERRY_CERT_KEY: ${{ secrets.CHERRY_CERT_KEY }}
+          CHERRY_CERT_CSP: ${{ secrets.CHERRY_CERT_CSP }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_OPTIONS: --max-old-space-size=8192
           MAIN_VITE_CHERRYAI_CLIENT_SECRET: ${{ secrets.MAIN_VITE_CHERRYAI_CLIENT_SECRET }}
