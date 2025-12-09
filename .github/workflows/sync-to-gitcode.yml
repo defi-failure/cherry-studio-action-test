@@ -8,6 +8,10 @@ on:
       tag:
         description: 'Release tag (e.g. v1.0.0)'
         required: true
+      clean:
+        description: 'Clean node_modules before build'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,20 +52,10 @@ jobs:
         shell: bash
         run: corepack enable && corepack prepare yarn@4.9.1 --activate
 
-      - name: Get yarn cache directory path
-        id: yarn-cache-dir-path
+      - name: Clean node_modules
+        if: ${{ github.event.inputs.clean == 'true' }}
         shell: bash
-        run: echo "dir=$(yarn config get cacheFolder)" >> $GITHUB_OUTPUT
-
-      - name: Cache yarn dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.yarn-cache-dir-path.outputs.dir }}
-            node_modules
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-yarn-
+        run: rm -rf node_modules
 
       - name: Install Dependencies
         shell: bash
@@ -94,6 +88,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ steps.get-tag.outputs.tag }}
         run: |
+          echo "Downloading release assets for $TAG_NAME..."
           mkdir -p release-assets
           cd release-assets
 
@@ -142,9 +137,9 @@ jobs:
         shell: bash
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GITCODE_OWNER: ${{ secrets.GITCODE_OWNER }}
-          GITCODE_REPO: ${{ secrets.GITCODE_REPO }}
-          GITCODE_API_URL: ${{ secrets.GITCODE_API_URL }}
+          GITCODE_OWNER: ${{ vars.GITCODE_OWNER }}
+          GITCODE_REPO: ${{ vars.GITCODE_REPO }}
+          GITCODE_API_URL: ${{ vars.GITCODE_API_URL }}
           TAG_NAME: ${{ steps.get-tag.outputs.tag }}
           RELEASE_NAME: ${{ steps.release-info.outputs.name }}
           LANG: C.UTF-8

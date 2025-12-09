@@ -27,9 +27,9 @@ jobs:
         shell: bash
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          GITCODE_OWNER: ${{ secrets.GITCODE_OWNER }}
-          GITCODE_REPO: ${{ secrets.GITCODE_REPO }}
-          GITCODE_API_URL: ${{ secrets.GITCODE_API_URL }}
+          GITCODE_OWNER: ${{ vars.GITCODE_OWNER }}
+          GITCODE_REPO: ${{ vars.GITCODE_REPO }}
+          GITCODE_API_URL: ${{ vars.GITCODE_API_URL }}
           TAG_NAME: ${{ github.event.inputs.tag }}
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
