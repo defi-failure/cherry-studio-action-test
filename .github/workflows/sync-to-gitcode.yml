@@ -184,44 +184,53 @@ jobs:
           # Step 2: Upload files to release
           echo "Uploading files to GitCode release..."
 
-          # Function to upload a single file
+          # Function to upload a single file with retry
           upload_file() {
             local file="$1"
             local filename=$(basename "$file")
+            local max_retries=3
+            local retry=0
+
             echo "Uploading: $filename"
 
             # URL encode the filename
             encoded_filename=$(printf '%s' "$filename" | jq -sRr @uri)
 
-            # Get upload URL
-            UPLOAD_INFO=$(curl -s \
-              "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${encoded_filename}")
+            while [ $retry -lt $max_retries ]; do
+              # Get upload URL
+              UPLOAD_INFO=$(curl -s \
+                "${API_URL}/repos/${GITCODE_OWNER}/${GITCODE_REPO}/releases/${TAG_NAME}/upload_url?access_token=${GITCODE_TOKEN}&file_name=${encoded_filename}")
 
-            UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
+              UPLOAD_URL=$(echo "$UPLOAD_INFO" | jq -r '.url // empty')
 
-            if [ -n "$UPLOAD_URL" ]; then
-              # Write headers to temp file to avoid shell escaping issues
-              echo "$UPLOAD_INFO" | jq -r '.headers | to_entries[] | "header = \"" + .key + ": " + .value + "\""' > /tmp/upload_headers.txt
+              if [ -n "$UPLOAD_URL" ]; then
+                # Write headers to temp file to avoid shell escaping issues
+                echo "$UPLOAD_INFO" | jq -r '.headers | to_entries[] | "header = \"" + .key + ": " + .value + "\""' > /tmp/upload_headers.txt
 
-              # Upload file using PUT with headers from file
-              UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
-                -K /tmp/upload_headers.txt \
-                --data-binary "@${file}" \
-                "$UPLOAD_URL")
+                # Upload file using PUT with headers from file
+                UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT \
+                  -K /tmp/upload_headers.txt \
+                  --data-binary "@${file}" \
+                  "$UPLOAD_URL")
 
-              HTTP_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n1)
-              RESPONSE_BODY=$(echo "$UPLOAD_RESPONSE" | sed '$d')
+                HTTP_CODE=$(echo "$UPLOAD_RESPONSE" | tail -n1)
 
-              if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-                echo "  Uploaded: $filename"
+                if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+                  echo "  Uploaded: $filename"
+                  return 0
+                else
+                  echo "  Failed (HTTP $HTTP_CODE), retry $((retry + 1))/$max_retries"
+                fi
               else
-                echo "  Warning: Failed to upload $filename (HTTP $HTTP_CODE)"
-                echo "  Response: $RESPONSE_BODY"
+                echo "  Failed to get upload URL, retry $((retry + 1))/$max_retries"
               fi
-            else
-              echo "  Warning: Failed to get upload URL for $filename"
-              echo "  Response: $UPLOAD_INFO"
-            fi
+
+              retry=$((retry + 1))
+              [ $retry -lt $max_retries ] && sleep 3
+            done
+
+            echo "  Failed: $filename after $max_retries retries"
+            exit 1
           }
 
           # Upload non-yml/json files first
